@@ -1,0 +1,74 @@
+---
+- name: Initial Setup for the Ubuntu Server
+  hosts: all
+  remote_user: ubuntu
+  become: yes
+  vars:
+    doc_root: /var/www/defaultsite
+  tasks:
+  - name: Run sudo without authenticating via password
+    lineinfile:
+        path: /etc/sudoers
+        state: present
+        regexp: '^%sudo'
+        line: '%sudo ALL=(ALL) NOPASSWD: ALL'
+        validate: 'visudo -cf %s'
+
+  - name: Update and Upgrade
+    apt: update_cache=yes upgrade=full cache_valid_time=3600
+
+  - name: Install Packages for basic functionality
+    package:
+      name: "{{packages}}"
+      state: present
+    vars:
+      packages:
+        - vim
+        - curl
+        - wget
+        - locate
+        - git
+        - apache2
+        - default-jre
+        - default-jdk
+        - openssh-server
+
+  - name: Allow HTTP, HTTPS and SSH in UFW
+    community.general.ufw:
+        rule: "allow"
+        port: "{{ item }}"
+        proto: "tcp"
+    with_items:
+        - "22"
+        - "80"
+        - "443"
+  - name: Allow OpenSSH in UFW
+    ufw: rule=allow name=OpenSSH
+  - name: Enable UFW, deny all policy
+    community.general.ufw:
+        state: "enabled"
+        policy: "deny"
+        logging: "on"
+  
+  - name: Enable Apache2 modules
+    apache2_module:
+      state: present
+      name: "{{ item }}"
+    with_items:
+        - ssl
+        - rewrite
+        - proxy_http
+
+  - name: Create custom document root
+    file: path={{ doc_root }} state=directory owner=ubuntu group=ubuntu
+
+  - name: Set up HTML file
+    copy: src=index.html dest={{ doc_root }}/index.html owner=ubuntu group=ubuntu mode=0644
+
+  - name: Set up Apache virtual host file
+    template: src=vhost.tpl dest=/etc/apache2/sites-available/000-default.conf
+    notify: restart apache
+
+  handlers:
+    - name: restart apache
+      service: name=apache2 state=restarted
